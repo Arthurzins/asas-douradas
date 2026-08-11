@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Asas Douradas</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#06111a;color:#fff;font-family:Arial,sans-serif}
+canvas{display:block}
+#ui{position:fixed;inset:0;pointer-events:none}
+.panel{background:rgba(5,15,23,.88);border:1px solid #dcb23b;border-radius:12px;padding:10px;box-shadow:0 0 20px #0008}
+#hud{position:absolute;left:14px;top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.stat{min-width:105px}
+#miniWrap{position:absolute;right:14px;top:14px;pointer-events:auto;cursor:pointer}
+#mini{width:180px;height:130px;display:block;background:#0b2630;border-radius:8px}
+#hint{position:absolute;left:14px;bottom:14px;max-width:420px}
+#msg{display:none;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:22px;font-weight:900;text-align:center}
+#start,#pause,#mapScreen,#formScreen,#warning{position:fixed;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;background:radial-gradient(circle,#195660,#02070b 78%)}
+.card{max-width:760px;margin:20px;padding:32px;text-align:center;background:rgba(5,15,23,.95);border:1px solid #e3b632;border-radius:22px;box-shadow:0 20px 60px #0009}
+h1{font-size:clamp(42px,7vw,78px);color:#ffd451;margin:0 0 15px}
+h2{color:#ffd451}
+button{padding:12px 22px;margin:5px;border:0;border-radius:10px;background:#ffd34f;color:#17120a;font-weight:900;font-size:16px;cursor:pointer}
+button.secondary{background:#28434d;color:#fff}
+button:disabled{opacity:.45;cursor:not-allowed}
+.hidden{display:none!important}
+.menuGrid{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:8px;margin:18px 0}
+#mapCanvas{width:min(900px,90vw);height:min(600px,70vh);background:#09242d;border:1px solid #dcb23b;border-radius:12px}
+#formList{display:grid;grid-template-columns:repeat(2,minmax(180px,1fr));gap:8px;text-align:left;max-height:55vh;overflow:auto}
+.formItem{border:1px solid #48606a;border-radius:10px;padding:10px;background:#0b1c24}
+.formItem.equipped{border-color:#ffd451}
+.small{font-size:13px;color:#b8c8ce}
+#warning{display:none;z-index:30;padding:25px;box-sizing:border-box}
+#waterButton{position:fixed;right:14px;bottom:14px;z-index:4;display:none}
+@media(max-width:700px){#mini{width:135px;height:100px}.menuGrid,#formList{grid-template-columns:1fr}.panel{font-size:13px}}
+</style>
+</head>
+<body>
+<div id="warning"><div class="card"><h2>Não foi possível carregar o motor 3D</h2>
+<p>O jogo tentou carregar o Three.js por mais de uma fonte.</p>
+<p class="small">Verifique a conexão e recarregue a página. Para funcionamento totalmente offline, o Three.js precisa estar salvo junto ao HTML.</p></div></div>
+
+<div id="start"><div class="card">
+<h1>ASAS DOURADAS</h1>
+<p>Explore a cidade, derrote inimigos, evolua por XP, encontre 65 nozes e descubra o Portal Azul.</p>
+<p class="small">As nozes aumentam a exploração. A evolução depende dos inimigos derrotados.</p>
+<button id="play">COMEÇAR O VOO</button>
+</div></div>
+
+<div id="pause" class="hidden"><div class="card">
+<h2>PAUSADO</h2>
+<div class="menuGrid">
+<button data-open="forms">🐉 Formas e habilidades</button>
+<button data-open="commands">🎮 Comandos</button>
+<button data-open="lore">📖 Lore</button>
+<button data-open="map">🗺️ Mapa completo</button>
+</div>
+<button id="resume">CONTINUAR</button>
+</div></div>
+
+<div id="formScreen" class="hidden"><div class="card">
+<h2>Formas e habilidades</h2>
+<div id="formList"></div>
+<button id="closeForms">VOLTAR</button>
+</div></div>
+
+<div id="mapScreen" class="hidden"><div class="card">
+<h2>Mapa de Asas Douradas</h2>
+<canvas id="mapCanvas" width="900" height="600"></canvas>
+<p class="small">Clique nos pontos de teleporte.</p>
+<button id="closeMap">VOLTAR</button>
+</div></div>
+
+<div id="ui">
+<div id="hud">
+<div class="panel stat">🌰 Nozes: <b id="nuts">0/65</b></div>
+<div class="panel stat">⭐ XP: <b id="xp">0</b></div>
+<div class="panel stat">🐉 Forma: <b id="form">Filhote</b></div>
+<div class="panel stat">⚡ Energia: <b id="energy">100%</b></div>
+<div class="panel stat">🗺️ Exploração: <b id="explore">0%</b></div>
+</div>
+<div id="miniWrap" class="panel" title="Clique para abrir o mapa"><canvas id="mini" width="180" height="130"></canvas></div>
+<div id="hint" class="panel">ESC: pausa · F: ataque · Q: supremo · WASD/setas: voar · Espaço/Ctrl: subir/descer · Shift: impulso</div>
+<div id="msg" class="panel"></div>
+</div>
+<button id="waterButton" class="secondary">🔵 Equipar Pássaro da Água</button>
+
+<script>
+(function(){
+"use strict";
+var urls=[
+"https://cdn.jsdelivr.net/npm/three@0.178.0/build/three.min.js",
+"https://unpkg.com/three@0.178.0/build/three.min.js"
+];
+var idx=0;
+function load(){
+ var s=document.createElement("script");s.src=urls[idx];
+ s.onload=init;s.onerror=function(){idx++;if(idx<urls.length)load();else document.getElementById("warning").style.display="flex";};
+ document.head.appendChild(s);
+}
+load();
+
+function init(){
+ if(!window.THREE){document.getElementById("warning").style.display="flex";return;}
+ var renderer=new THREE.WebGLRenderer({antialias:true,powerPreference:"high-performance"});
+ renderer.setPixelRatio(Math.min(devicePixelRatio||1,1.75));
+ renderer.setSize(innerWidth,innerHeight);
+ renderer.shadowMap.enabled=true;
+ renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+ renderer.outputColorSpace=THREE.SRGBColorSpace;
+ document.body.appendChild(renderer.domElement);
+
+ var scene=new THREE.Scene();
+ scene.background=new THREE.Color(0x72b7c7);
+ scene.fog=new THREE.FogExp2(0x72b7c7,.0011);
+ var camera=new THREE.PerspectiveCamera(65,innerWidth/innerHeight,.1,5000);
+ scene.add(new THREE.HemisphereLight(0xc8f2ff,0x17382b,2.2));
+ var sun=new THREE.DirectionalLight(0xffe6a7,3);
+ sun.position.set(-500,900,400);sun.castShadow=true;sun.shadow.mapSize.set(1024,1024);scene.add(sun);
+
+ var world=new THREE.Group();scene.add(world);
+ var nuts=[],enemies=[],shots=[],teleports=[];
+ var mats={
+ stone:new THREE.MeshStandardMaterial({color:0x40565b,roughness:.82}),
+ gold:new THREE.MeshStandardMaterial({color:0xffca35,metalness:.7,roughness:.23,emissive:0x704400,emissiveIntensity:.4}),
+ green:new THREE.MeshStandardMaterial({color:0x2f8654,roughness:.8}),
+ leaf:new THREE.MeshStandardMaterial({color:0x65b95d,roughness:.9}),
+ blue:new THREE.MeshStandardMaterial({color:0x20b9d8,emissive:0x073d49,emissiveIntensity:.8}),
+ dark:new THREE.MeshStandardMaterial({color:0x172b32,metalness:.45,roughness:.5}),
+ red:new THREE.MeshStandardMaterial({color:0xb72e2e,emissive:0x4e0d09,emissiveIntensity:.5}),
+ water:new THREE.MeshStandardMaterial({color:0x087fa3,transparent:true,opacity:.72,metalness:.1,roughness:.15})
+ };
+ function box(x,y,z,w,h,d,m){var o=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m||mats.stone);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;world.add(o);return o;}
+ function cyl(x,y,z,r,h,m){var o=new THREE.Mesh(new THREE.CylinderGeometry(r,r,h,16),m||mats.stone);o.position.set(x,y,z);o.castShadow=o.receiveShadow=true;world.add(o);return o;}
+ function sphere(x,y,z,r,m){var o=new THREE.Mesh(new THREE.SphereGeometry(r,14,10),m||mats.green);o.position.set(x,y,z);o.castShadow=true;world.add(o);return o;}
+ function rand(a,b){return a+Math.random()*(b-a);}
+ function garden(x,z,r){r=r||40;cyl(x,6,z,r,8,mats.stone);for(var i=0;i<8;i++){var a=i*Math.PI*2/8;sphere(x+Math.cos(a)*r*.65,15,z+Math.sin(a)*r*.65,7,mats.leaf);}sphere(x,17,z,11,mats.green);}
+ function tower(x,z,h){cyl(x,h/2,z,18,h,mats.stone);cyl(x,h+5,z,25,10,mats.gold);}
+ function temple(x,z){box(x,6,z,120,12,90,mats.stone);for(var i=-2;i<=2;i++)cyl(x+i*22,35,z-34,6,58,mats.gold);box(x,35,z,85,50,65,mats.stone);box(x,24,z-34,25,28,4,mats.dark);}
+ box(0,-12,0,2300,20,2300,mats.dark);
+ for(var i=-4;i<=4;i++)box(i*230,1,0,42,3,2200,new THREE.MeshStandardMaterial({color:0x0b566b,roughness:.25}));
+ [[-700,-650],[-230,-500],[250,-430],[650,-600],[-650,0],[-200,80],[200,30],[620,100],[-700,600],[-170,520],[300,500],[700,650]].forEach(function(p){garden(p[0],p[1]);});
+ for(i=0;i<26;i++)tower(rand(-900,900),rand(-900,900),rand(80,180));
+ [[-720,-720],[700,-650],[-760,700],[720,720]].forEach(function(p){temple(p[0],p[1]);});
+ for(i=0;i<12;i++){var gx=-900+i*165,gz=Math.sin(i)*300;garden(gx,gz,44);box(gx,35,gz,82,6,82,mats.gold);}
+
+ var spots=[[-720,42,-720],[-720,80,-650],[-650,120,-720],[-790,35,-760],[-675,145,-785],[700,55,-650],[770,100,-650],[640,145,-690],[735,35,-760],[675,125,-560],[-760,50,700],[-690,115,700],[-820,165,650],[-720,38,790],[-610,95,750],[700,60,720],[760,135,760],[650,190,700],[800,45,650],[590,100,790],[-520,90,-430],[-180,110,-470],[220,125,-400],[560,80,-350],[-560,115,20],[-220,160,80],[180,95,40],[520,125,80],[-500,210,480],[-120,135,500],[280,190,470],[610,125,500],[0,240,0],[-930,130,-900],[930,135,900]];
+ var all=[];
+ for(i=0;i<65;i++){var p=spots[i%spots.length],ring=Math.floor(i/spots.length);all.push([p[0]+(ring*37)%90-45,p[1]+(ring%3)*28,p[2]+(ring*53)%90-45]);}
+ all.forEach(function(p,n){var g=new THREE.Group();var s=new THREE.Mesh(new THREE.SphereGeometry(6.5,14,10),mats.gold);s.scale.set(.8,1.25,.8);g.add(s);var r=new THREE.Mesh(new THREE.TorusGeometry(5,.7,8,16),mats.gold);r.rotation.x=.8;g.add(r);g.position.set(p[0],p[1],p[2]);g.userData={base:p[1],phase:n*.41,taken:false};world.add(g);nuts.push(g);});
+
+ function makeEnemy(x,y,z,type){
+  var g=new THREE.Group();
+  var mat=type==="Fantasma"?new THREE.MeshStandardMaterial({color:0x9f7cff,transparent:true,opacity:.65,emissive:0x38206e}):type==="Robô Pesado"?mats.red:type==="Caçador"?new THREE.MeshStandardMaterial({color:0xff6338,metalness:.5}):mats.blue;
+  var size=type==="Robô Pesado"?18:type==="Fantasma"?12:type==="Caçador"?11:9;
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(size,14,10),mat));
+  for(var j=0;j<4;j++){var w=new THREE.Mesh(new THREE.BoxGeometry(size*1.8,2.2,4),mats.dark);w.position.set(Math.cos(j*Math.PI/2)*size,0,Math.sin(j*Math.PI/2)*size);g.add(w);}
+  g.position.set(x,y,z);
+  var hp=type==="Robô Pesado"?12:type==="Fantasma"?5:type==="Caçador"?4:3;
+  var reward={"Drone Azul":500,"Caçador":1000,"Fantasma":1500,"Robô Pesado":2500}[type];
+  g.userData={hp:hp,xp:reward,type:type,phase:Math.random()*6};world.add(g);enemies.push(g);return g;
+ }
+ var types=["Drone Azul","Caçador","Fantasma","Robô Pesado"];
+ for(i=0;i<18;i++)makeEnemy(rand(-850,850),rand(60,220),rand(-850,850),types[i%4]);
+ var boss=makeEnemy(0,200,850,"Robô Pesado");boss.userData.boss=true;boss.userData.hp=30;boss.visible=false;
+
+ var bird=new THREE.Group();scene.add(bird);
+ var bodyMat=new THREE.MeshStandardMaterial({color:0x8d5b2b,roughness:.55});
+ var body=new THREE.Mesh(new THREE.SphereGeometry(9,18,14),bodyMat);body.scale.set(1.6,.75,1);bird.add(body);
+ var head=new THREE.Mesh(new THREE.SphereGeometry(6,16,12),bodyMat);head.position.set(0,2,-9);bird.add(head);
+ var beak=new THREE.Mesh(new THREE.ConeGeometry(2.5,7,8),mats.gold);beak.rotation.x=Math.PI/2;beak.position.set(0,2,-15);bird.add(beak);
+ var wl=new THREE.Mesh(new THREE.ConeGeometry(12,27,3),bodyMat);wl.position.x=-12;wl.rotation.z=.95;bird.add(wl);
+ var wr=wl.clone();wr.position.x=12;wr.rotation.z=-.95;bird.add(wr);
+ bird.position.set(0,90,300);
+
+ var forms=[
+  {n:"Filhote",need:0,v:45,scale:1,color:0x8d5b2b,skills:["Voo básico"]},
+  {n:"Pássaro",need:1500,v:57,scale:1.08,color:0xd39a3e,skills:["Voo básico","Impulso Aéreo"]},
+  {n:"Ave Celeste",need:5000,v:72,scale:1.18,color:0xdde8f0,skills:["Impulso Aéreo","Rajada Celestial"]},
+  {n:"Guardião Alado",need:10000,v:88,scale:1.32,color:0x6db7d9,skills:["Impulso Aéreo","Rajada Celestial","Escudo do Guardião"]},
+  {n:"Wyvern Celestial",need:18000,v:108,scale:1.48,color:0x8b6bdb,skills:["Impulso Aéreo","Rajada Celestial","Escudo do Guardião","Meteoro Celestial","Ataque Supremo"]}
+ ];
+ var waterForms=[
+  {n:"Pássaro da Água",need:0,v:48,scale:1.03,color:0x28c7e8,skills:["Jato d'Água"]},
+  {n:"Ave Celeste Aquática",need:5000,v:73,scale:1.2,color:0x56e8ff,skills:["Jato d'Água","Tornado de Água"]},
+  {n:"Guardião Alado Aquático",need:10000,v:89,scale:1.34,color:0x178fd0,skills:["Jato d'Água","Tornado de Água","Barreira Aquática"]},
+  {n:"Wyvern Aquático",need:18000,v:108,scale:1.5,color:0x0a6fb9,skills:["Jato d'Água","Tornado de Água","Barreira Aquática","Tsunami Celestial","Portal Azul"]}
+ ];
+ var xp=0,collected=0,energy=100,vel=new THREE.Vector3(),keys={},running=false,paused=false,waterUnlocked=false,waterLine=false,equipped=0;
+ var exploration={},portal=null,underwater=false;
+
+ function list(){return waterLine?waterForms:forms;}
+ function current(){var l=list(),f=l[0];for(var i=0;i<l.length;i++)if(xp>=l[i].need)f=l[i];return f;}
+ function appearance(){var f=current();bodyMat.color.setHex(f.color);bird.scale.setScalar(f.scale);}
+ function msg(t){var m=document.getElementById("msg");m.innerHTML=t;m.style.display="block";clearTimeout(msg.t);msg.t=setTimeout(function(){m.style.display="none";},2200);}
+ function ui(){
+  var f=current();document.getElementById("nuts").textContent="🌰 "+collected+"/65";document.getElementById("xp").textContent=xp;document.getElementById("form").textContent=f.n;document.getElementById("energy").textContent=Math.round(energy)+"%";
+  var areas=Object.keys(exploration).length;document.getElementById("explore").textContent=Math.round(collected/65*65+Math.min(35,areas/6*35))+"%";appearance();
+ }
+ function addXP(n){var before=current().n;xp+=n;var after=current().n;if(before!==after)msg("✨ EVOLUÇÃO: "+after.toUpperCase()+" ✨");ui();}
+ function draw(canvas){
+  var c=canvas.getContext("2d"),w=canvas.width,h=canvas.height;c.clearRect(0,0,w,h);c.fillStyle="#09242d";c.fillRect(0,0,w,h);
+  c.strokeStyle="#1e5664";for(var x=0;x<w;x+=45){c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke();}for(var y=0;y<h;y+=45){c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke();}
+  function xy(a,b){return[w/2+a/2400*w,h/2+b/2400*h];}
+  c.fillStyle="#285d49";c.fillRect(50,60,170,100);c.fillRect(650,80,170,110);c.fillRect(80,400,190,110);c.fillRect(620,400,200,120);
+  c.fillStyle="#ffd451";nuts.forEach(function(n){if(!n.userData.taken){var p=xy(n.position.x,n.position.z);c.beginPath();c.arc(p[0],p[1],2.5,0,7);c.fill();}});
+  c.fillStyle="#ff5b42";teleports.forEach(function(t){var p=xy(t.x,t.z);c.beginPath();c.arc(p[0],p[1],7,0,7);c.fill();});
+  if(waterUnlocked&&waterLine){c.fillStyle="#21d8ff";var q=xy(0,-900);c.beginPath();c.arc(q[0],q[1],8,0,7);c.fill();}
+  var b=xy(bird.position.x,bird.position.z);c.fillStyle="#fff";c.beginPath();c.arc(b[0],b[1],6,0,7);c.fill();
+ }
+ function openMap(){paused=true;document.getElementById("mapScreen").classList.remove("hidden");draw(document.getElementById("mapCanvas"));}
+ function openForms(){
+  paused=true;var box=document.getElementById("formList");box.innerHTML="";
+  list().forEach(function(f,i){var ok=xp>=f.need,d=document.createElement("div");d.className="formItem"+(i===equipped?" equipped":"");d.innerHTML="<b>"+f.n+"</b><br><span class='small'>XP: "+f.need+" · "+f.skills.join(" · ")+"</span><br>";
+   var b=document.createElement("button");b.textContent=i===equipped?"Equipado":ok?"Equipar":"Bloqueado";b.disabled=!ok||i===equipped;b.onclick=function(){equipped=i;appearance();openForms();};d.appendChild(b);box.appendChild(d);});
+  document.getElementById("formScreen").classList.remove("hidden");
+ }
+ function teleport(t){bird.position.set(t.x,Math.max(80,t.y),t.z);vel.set(0,0,0);msg("📍 "+t.name);document.getElementById("mapScreen").classList.add("hidden");paused=false;}
+ function addTeleport(name,x,y,z){var g=new THREE.Group();g.position.set(x,y,z);var ring=new THREE.Mesh(new THREE.TorusGeometry(12,2,10,32),mats.gold);ring.rotation.x=Math.PI/2;g.add(ring);var beam=new THREE.Mesh(new THREE.CylinderGeometry(1.5,1.5,35,10),mats.blue);beam.position.y=17;g.add(beam);world.add(g);teleports.push({name:name,x:x,y:y,z:z});}
+ addTeleport("Templo Norte",-720,80,-720);addTeleport("Templo Sul",-760,80,700);addTeleport("Cidade Central",0,90,0);addTeleport("Templo Leste",720,80,720);addTeleport("Torre Oeste",-900,100,0);
+
+ function makePortal(){if(portal)return;portal=new THREE.Group();portal.position.set(0,120,-900);var r=new THREE.Mesh(new THREE.TorusGeometry(35,5,16,48),new THREE.MeshStandardMaterial({color:0x1ee7ff,emissive:0x087dff,emissiveIntensity:2}));portal.add(r);portal.add(new THREE.PointLight(0x16dfff,6,220));world.add(portal);}
+ function supreme(){if(!waterLine||current().n!=="Wyvern Aquático"){msg("🔒 O Portal Azul exige o Wyvern Aquático.");return;}makePortal();if(bird.position.distanceTo(portal.position)<120){underwater=true;scene.background.set(0x052b45);scene.fog.color.set(0x052b45);scene.fog.density=.0022;bird.position.set(0,40,0);msg("🌊 PORTAL AZUL — REINO SUBMARINO");}else msg("🔵 Vá até o Portal Azul e use Q.");}
+
+ addEventListener("keydown",function(e){var k=e.key.toLowerCase();if(k==="escape"){if(!running)return;if(!document.getElementById("mapScreen").classList.contains("hidden")||!document.getElementById("formScreen").classList.contains("hidden")){document.getElementById("mapScreen").classList.add("hidden");document.getElementById("formScreen").classList.add("hidden");paused=false;return;}paused=!paused;document.getElementById("pause").classList.toggle("hidden",!paused);return;}keys[k]=true;if(!running||paused)return;
+  if(k==="f"&&energy>=8){energy-=8;var s=new THREE.Mesh(new THREE.SphereGeometry(3,8,8),mats.gold);s.position.copy(bird.position);s.userData={life:2,dir:new THREE.Vector3(0,0,-1).applyQuaternion(bird.quaternion).normalize()};world.add(s);shots.push(s);}
+  if(k==="q"&&energy>=35){energy-=35;supreme();}
+ });
+ addEventListener("keyup",function(e){keys[e.key.toLowerCase()]=false;});
+ document.getElementById("play").onclick=function(){document.getElementById("start").classList.add("hidden");running=true;msg("🌰 Encontre as 65 nozes e derrote os inimigos!");};
+ document.getElementById("resume").onclick=function(){paused=false;document.getElementById("pause").classList.add("hidden");};
+ document.querySelectorAll("[data-open]").forEach(function(b){b.onclick=function(){document.getElementById("pause").classList.add("hidden");if(b.dataset.open==="forms")openForms();else if(b.dataset.open==="map")openMap();else if(b.dataset.open==="commands")msg("WASD/setas: voar · Espaço: subir · Ctrl: descer · Shift: impulso · F: ataque · Q: supremo");else msg("📖 Uma cidade suspensa guarda um segredo além dos céus. O Reino Submarino é uma aventura separada.");};});
+ document.getElementById("closeForms").onclick=function(){document.getElementById("formScreen").classList.add("hidden");paused=false;};
+ document.getElementById("closeMap").onclick=function(){document.getElementById("mapScreen").classList.add("hidden");paused=false;};
+ document.getElementById("miniWrap").onclick=openMap;
+ document.getElementById("mapCanvas").onclick=function(e){var r=this.getBoundingClientRect(),mx=(e.clientX-r.left)/r.width*this.width,my=(e.clientY-r.top)/r.height*this.height;teleports.forEach(function(t){var tx=this.width/2+t.x/2400*this.width,ty=this.height/2+t.z/2400*this.height;if(Math.hypot(mx-tx,my-ty)<22)teleport(t);},this);};
+
+ document.getElementById("waterButton").onclick=function(){if(waterUnlocked){waterLine=true;equipped=0;appearance();msg("🌊 Pássaro da Água equipado.");this.style.display="none";ui();}};
+
+ var last=performance.now();
+ function loop(){requestAnimationFrame(loop);if(!running||paused)return;var now=performance.now(),dt=Math.min(.035,(now-last)/1000);last=now;var f=current(),d=new THREE.Vector3();
+  if(keys.w||keys.arrowup)d.z--;if(keys.s||keys.arrowdown)d.z++;if(keys.a||keys.arrowleft)d.x--;if(keys.d||keys.arrowright)d.x++;if(keys[" "])d.y++;if(keys.control)d.y--;if(d.lengthSq())d.normalize();
+  var boost=keys.shift&&energy>1;if(boost)energy=Math.max(0,energy-22*dt);else energy=Math.min(100,energy+8*dt);
+  vel.lerp(d.multiplyScalar(f.v*(boost?1.7:1)),1-Math.pow(.001,dt));bird.position.addScaledVector(vel,dt);
+  bird.position.x=THREE.MathUtils.clamp(bird.position.x,-1080,1080);bird.position.z=THREE.MathUtils.clamp(bird.position.z,-1080,1080);bird.position.y=THREE.MathUtils.clamp(bird.position.y,20,450);
+  if(vel.length()>2)bird.lookAt(bird.position.clone().add(vel));wl.rotation.z=.95+Math.sin(now*.012)*.2;wr.rotation.z=-.95-Math.sin(now*.012)*.2;
+  nuts.forEach(function(n){if(!n.userData.taken){n.rotation.y+=dt*1.5;n.position.y=n.userData.base+Math.sin(now*.002+n.userData.phase)*2;if(n.position.distanceTo(bird.position)<22){n.userData.taken=true;n.visible=false;collected++;exploration[Math.floor(n.position.x/300)+":"+Math.floor(n.position.z/300)]=true;msg("🌰 Noz "+collected+"/65");}}});
+  enemies.forEach(function(e){if(!e.visible)return;var dist=e.position.distanceTo(bird.position);if(dist<320){var to=bird.position.clone().sub(e.position).normalize(),sp=e.userData.type==="Robô Pesado"?7:e.userData.type==="Fantasma"?20:e.userData.type==="Caçador"?17:13;e.position.addScaledVector(to,dt*sp);if(e.userData.type==="Fantasma")e.position.y+=Math.sin(now*.003+e.userData.phase)*dt*12;}if(dist<20)energy=Math.max(0,energy-10*dt);});
+  shots.forEach(function(s){s.position.addScaledVector(s.userData.dir,dt*240);s.userData.life-=dt;enemies.forEach(function(e){if(e.visible&&s.position.distanceTo(e.position)<24){e.userData.hp-=2;s.userData.life=0;if(e.userData.hp<=0){e.visible=false;addXP(e.userData.xp);if(e.userData.type==="Robô Pesado"&&!waterUnlocked&&Math.random()<.58){waterUnlocked=true;document.getElementById("waterButton").style.display="block";msg("🔵 58% — PÁSSARO DA ÁGUA DESBLOQUEADO!");}}}});});
+  shots=shots.filter(function(s){if(s.userData.life<=0){world.remove(s);s.geometry.dispose();return false;}return true;});
+  ui();var off=new THREE.Vector3(0,35,105).applyQuaternion(bird.quaternion);camera.position.lerp(bird.position.clone().add(off),1-Math.pow(.002,dt));camera.lookAt(bird.position.clone().add(new THREE.Vector3(0,0,-60).applyQuaternion(bird.quaternion)));if(portal)portal.rotation.z+=dt*.7;renderer.render(scene,camera);draw(document.getElementById("mini"));
+ }
+ camera.position.set(0,125,460);bird.position.set(0,90,300);ui();draw(document.getElementById("mini"));loop();
+ addEventListener("resize",function(){camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+}
+})();
+</script>
+</body>
+</html>
